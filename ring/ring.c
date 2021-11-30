@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include "mpi.h"
 
-static inline finalize_exit(int code)
+static inline void finalize_exit(int code)
 {
     MPI_Finalize();
     exit(code);
