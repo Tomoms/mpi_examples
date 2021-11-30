@@ -1,12 +1,5 @@
 #include <stdio.h>
-#include <stdlib.h>
 #include "mpi.h"
-
-static inline void finalize_exit(int code)
-{
-    MPI_Finalize();
-    exit(code);
-}
 
 int main(int argc, char *argv[])
 {
@@ -51,5 +44,6 @@ int main(int argc, char *argv[])
     
     printf("I am process %d and I have received %d messages. My final messages have got tag %d (from the right) and %d (from the left), and values %d (from the right) and %d (from the left)\n", rank, received, status_add.MPI_TAG, status_subtract.MPI_TAG, payload_add, payload_subtract);
 
-    finalize_exit(0);
+    MPI_Finalize();
+    return 0;
 }
