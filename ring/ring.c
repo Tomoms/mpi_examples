@@ -23,18 +23,20 @@ int main(int argc, char *argv[])
     int received = 0;
 
     if (!rank) {
+        int former_add, former_subtract;
         for (int i = 0; i < nproc; i++) {
+            former_add = payload_add;
             MPI_Recv(&payload_add, 1, MPI_INT, right, 10 * right, MPI_COMM_WORLD, &status_add);
             received++;
-            MPI_Send(&payload_add, 1, MPI_INT, left, 10 * rank, MPI_COMM_WORLD);
+            MPI_Send(&former_add, 1, MPI_INT, left, 10 * rank, MPI_COMM_WORLD);
 
+            former_subtract = payload_subtract;
             MPI_Recv(&payload_subtract, 1, MPI_INT, left, 10 * left, MPI_COMM_WORLD, &status_subtract);
             received++;
-            MPI_Send(&payload_subtract, 1, MPI_INT, right, 10 * rank, MPI_COMM_WORLD);
+            MPI_Send(&former_subtract, 1, MPI_INT, right, 10 * rank, MPI_COMM_WORLD);
         }
     } else {
         for (int i = 0; i < nproc; i++) {
-            printf("incrementing payload %d to %d\n", payload_add, payload_add + rank);
             payload_add += rank;
             MPI_Send(&payload_add, 1, MPI_INT, left, 10 * rank, MPI_COMM_WORLD);
             MPI_Recv(&payload_add, 1, MPI_INT, right, 10 * right, MPI_COMM_WORLD, &status_add);
