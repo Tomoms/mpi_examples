@@ -42,7 +42,9 @@ int main(int argc, char *argv[])
         }
     }
     
-    printf("I am process %d and I have received %d messages. My final messages have got tag %d (from the right) and %d (from the left), and values %d (from the right) and %d (from the left)\n", rank, received, status_add.MPI_TAG, status_subtract.MPI_TAG, payload_add, payload_subtract);
+    printf("I am process %d and I have received %d messages.", rank, received);
+    printf("My final messages have got tag %d (from the right) and %d (from the left), and values %d (from the right) and %d (from the left)\n",
+           status_add.MPI_TAG, status_subtract.MPI_TAG, payload_add, payload_subtract);
 
     MPI_Finalize();
     return 0;
