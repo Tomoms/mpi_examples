@@ -4,7 +4,6 @@ SUBDIRS_CLEAN := $(addsuffix .clean, $(SUBDIRS))
 all: $(SUBDIRS)
 
 $(SUBDIRS):
-	module load openmpi
 	$(MAKE) -C $@
 
 clean: $(SUBDIRS_CLEAN)
