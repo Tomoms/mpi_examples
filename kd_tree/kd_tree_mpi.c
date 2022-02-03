@@ -9,6 +9,7 @@
 #include "mpi.h"
 
 #define DATASET_SIZE	10
+#define REAL_VARIANCE
 #ifndef VERBOSE
 #define VERBOSE			1
 #endif
@@ -57,15 +58,20 @@ double get_mean(double *data, int len, char axis)
 	return mean;
 }
 
-// TODO remove useless division and squaring
 double get_variance(double *data, int len, char axis, double mean)
 {
 	double *startpos = data + axis * len;
 	double *endpos = data + (axis + 1) * len;
 	double variance = 0;
 	for (double *scanner = startpos; scanner < endpos; scanner++)
-		variance += (*scanner - mean) * (*scanner - mean);
+		variance += (*scanner - mean)
+#ifdef REAL_VARIANCE
+		* (*scanner - mean)
+#endif
+		;
+#ifdef REAL_VARIANCE
 	variance /= len;
+#endif
 	return variance;
 }
 
