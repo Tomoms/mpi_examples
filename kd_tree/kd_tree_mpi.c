@@ -126,6 +126,24 @@ int main(int argc, char *argv[])
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	MPI_Status status;
 
+	MPI_Datatype node_type;
+	int lengths[4] = {1, 2, 1, 1};
+	struct kdnode dummy;
+	MPI_Aint displacements[4];
+	MPI_Aint base_address;
+	MPI_Get_address(&dummy, &base_address);
+	MPI_Get_address(&dummy.axis, &displacements[0]);
+	MPI_Get_address(&dummy.split, &displacements[1]);
+	MPI_Get_address(&dummy.left, &displacements[2]);
+	MPI_Get_address(&dummy.right, &displacements[3]);
+	displacements[0] = MPI_Aint_diff(displacements[0], base_address);
+	displacements[1] = MPI_Aint_diff(displacements[1], base_address);
+	displacements[2] = MPI_Aint_diff(displacements[2], base_address);
+	displacements[3] = MPI_Aint_diff(displacements[3], base_address);
+	MPI_Datatype types[4] = {MPI_CHAR, MPI_DOUBLE, MPI_AINT, MPI_AINT};
+	MPI_Type_create_struct(4, lengths, displacements, types, &node_type);
+	MPI_Type_commit(&node_type);
+
 	int my_first_child = 2 * rank + 1;
 	int my_second_child = my_first_child + 1;
 	int my_parent = (int) (rank / 2);
