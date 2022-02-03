@@ -112,6 +112,7 @@ struct kdnode build_node(double *my_data, int my_data_len)
 #if VERBOSE
 	printf("node: axis = %d; point x = %lf, y = %lf\n", my_node->axis, my_node->split[0], my_node->split[1]);
 #endif
+	return my_node;
 }
 
 int main(int argc, char *argv[])
