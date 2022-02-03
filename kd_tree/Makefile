@@ -1,4 +1,5 @@
 CC=mpicc
+LDFLAGS=-lm
 
 kd_tree_mpi:
 
