@@ -4,6 +4,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <fcntl.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include "mpi.h"
@@ -96,7 +97,7 @@ int get_median_index(double *data, int len, char axis, double mean)
 	return index;
 }
 
-struct kdnode build_node(double *my_data, int my_data_len)
+struct kdnode build_node(double *my_data, int my_data_len, int rank)
 {
 	double mean[2];
 	double variance[2];
@@ -116,7 +117,7 @@ struct kdnode build_node(double *my_data, int my_data_len)
 	my_node.split[0] = my_data[median_idx];
 	my_node.split[1] = my_data[median_idx + my_data_len];
 #if VERBOSE
-	printf("node: axis = %d; point x = %lf, y = %lf\n", my_node.axis, my_node.split[0], my_node.split[1]);
+	printf("process %d: node: axis = %d; point x = %lf, y = %lf\n", rank, my_node.axis, my_node.split[0], my_node.split[1]);
 #endif
 	return my_node;
 }
@@ -141,17 +142,68 @@ void setup_node_type(MPI_Datatype *node_type)
 	MPI_Type_commit(node_type);
 }
 
-void split_data(double *data, int len, double *left, int left_len, double *right, int right_len)
+void split_data(double *data, int len, double **left, int *left_len, double **right,
+				int *right_len, struct kdnode *node)
 {
+	double *startpos = data + node->axis * len;
+	double *endpos = data + (node->axis + 1) * len;
+	int data_right_len = 0;
+	for (double *scanner = startpos; scanner < endpos; scanner++) {
+		if (*scanner > node->split[node->axis])
+			data_right_len++;
+	}
+	*right_len = data_right_len;
+	int data_left_len = len - data_right_len - 1;
+	*left_len = data_left_len;
+	*left = malloc(sizeof(double) * data_left_len * 2);
+	*right = malloc(sizeof(double) * data_right_len * 2);
+	if (!(*left) || !(*right))
+		perror_exit("malloc()");
+	int rindex = 0, lindex = 0;
+	for (int i = 0; i < len; i++) {
+		if (data[i + node->axis * len] > node->split[node->axis]) {
+			(*right)[rindex] = data[i];
+			(*right)[rindex + data_right_len] = data[i + len];
+			rindex++;
+		} else {
+			if (data[i] == node->split[0] && data[i + len] == node->split[1])
+				continue;
+			(*left)[lindex] = data[i];
+			(*left)[lindex + data_left_len] = data[i + len];
+			lindex++;
+		}
+	}
+}
 
+void send_data(double *left, int left_len, int left_rank, double *right, int right_len, int right_rank)
+{
+	MPI_Request request_left, request_left_len, request_right, request_right_len;
+	MPI_Status status_left, status_left_len, status_right, status_right_len;
+	MPI_Isend(&left_len, 1, MPI_INT, left_rank, MMPI_TAG_METADATA, MPI_COMM_WORLD, &request_left_len);
+	MPI_Wait(&request_left_len, &status_left_len);
+	MPI_Isend(left, 2 * left_len, MPI_DOUBLE, left_rank, MMPI_TAG_DATA, MPI_COMM_WORLD, &request_left);
+	MPI_Isend(&right_len, 1, MPI_INT, right_rank, MMPI_TAG_METADATA, MPI_COMM_WORLD, &request_right_len);
+	MPI_Wait(&request_right_len, &status_right_len);
+	MPI_Isend(right, 2 * right_len, MPI_DOUBLE, right_rank, MMPI_TAG_DATA, MPI_COMM_WORLD, &request_right);
+	MPI_Wait(&request_left, &status_left);
+	MPI_Wait(&request_right, &status_right);
+}
+
+void send_exit_signal(int left_rank, int right_rank)
+{
+	int dummy = -1;
+	MPI_Request request_left_len, request_right_len;
+	MPI_Isend(&dummy, 1, MPI_INT, left_rank, MMPI_TAG_METADATA, MPI_COMM_WORLD, &request_left_len);
+	MPI_Isend(&dummy, 1, MPI_INT, right_rank, MMPI_TAG_METADATA, MPI_COMM_WORLD, &request_right_len);
 }
 
 int main(int argc, char *argv[])
 {
-	int nproc, rank;
+	int nproc, rank, ndead;
 	double *my_data;
 	int my_data_len;
 	struct kdnode *tree;
+	struct kdnode my_node;
 
 	MPI_Init(&argc, &argv);
 	MPI_Comm_size(MPI_COMM_WORLD, &nproc);
@@ -180,65 +232,73 @@ int main(int argc, char *argv[])
 		tree_levels += lower > my_data_len;
 		printf("lower = %ld; upper = %ld;\n", lower, upper);
 		*/
-		tree = malloc(sizeof(struct kdnode));
+		tree = malloc(sizeof(struct kdnode) * nproc);
 		if (!tree)
 			perror_exit("malloc()");
+	} else {
+		MPI_Recv(&my_data_len, 1, MPI_INT, my_parent, MMPI_TAG_METADATA, MPI_COMM_WORLD, &status);
+		if (my_data_len == -1) {
+			my_node.axis = -2;
+			MPI_Send(&my_node, 1, node_type, 0, MMPI_TAG_NODE, MPI_COMM_WORLD);
+			MPI_Finalize();
+			return 0;
+		}
+		my_data = malloc(sizeof(double) * my_data_len * 2);
+		if (!my_data)
+			perror_exit("malloc()");
+		MPI_Recv(my_data, 2 * my_data_len, MPI_DOUBLE, my_parent, MMPI_TAG_DATA, MPI_COMM_WORLD, &status);
 	}
 
-	if (!rank) {
-		struct kdnode my_node = build_node(my_data, my_data_len);
-		double *startpos = my_data + my_node.axis * my_data_len;
-		double *endpos = my_data + (my_node.axis + 1) * my_data_len;
-		int data_right_len = 0;
-		for (double *scanner = startpos; scanner < endpos; scanner++) {
-			if (*scanner > my_node.split[my_node.axis])
-				data_right_len++;
-		}
-		int data_left_len = my_data_len - data_right_len - 1;
-		double *data_left = malloc(sizeof(double) * data_left_len * 2);
-		double *data_right = malloc(sizeof(double) * data_right_len * 2);
-		if (!data_left || !data_right)
-			perror_exit("malloc()");
-		int rindex = 0, lindex = 0;
-		for (int i = 0; i < my_data_len; i++) {
-			if (my_data[i + my_node.axis * my_data_len] > my_node.split[my_node.axis]) {
-				data_right[rindex] = my_data[i];
-				data_right[rindex + data_right_len] = my_data[i + my_data_len];
-				rindex++;
-			} else {
-				if (my_data[i] == my_node.split[0] && my_data[i + my_data_len] == my_node.split[1])
-					continue;
-				data_left[lindex] = my_data[i];
-				data_left[lindex + data_left_len] = my_data[i + my_data_len];
-				lindex++;
-			}
-		}
+	MPI_Bcast(&tree, 1, MPI_AINT, 0, MPI_COMM_WORLD);
+
+	if (my_data_len > 1) {
+		my_node = build_node(my_data, my_data_len, rank);
+		my_node.left = tree + my_left_child;
+		my_node.right = tree + my_right_child;
+		double *data_left, *data_right;
+		int data_left_len, data_right_len;
+		split_data(my_data, my_data_len, &data_left, &data_left_len, &data_right, &data_right_len, &my_node);
 #if VERBOSE
 		for (int i = 0; i < data_left_len * 2; i++)
 			printf("data_left[%d] = %lf\n", i, data_left[i]);
 		for (int i = 0; i < data_right_len * 2; i++)
 			printf("data_right[%d] = %lf\n", i, data_right[i]);
 #endif
-		MPI_Request trash;
-		MPI_Request req_left, req_right;
-		MPI_Status status_left, status_right;
-		MPI_Isend(&data_left_len, 1, MPI_INT, my_left_child, MMPI_TAG_METADATA, MPI_COMM_WORLD, &trash);
-		MPI_Isend(data_left, 2 * data_left_len, MPI_DOUBLE, my_left_child, MMPI_TAG_DATA, MPI_COMM_WORLD, &req_left);
-		MPI_Isend(&data_right_len, 1, MPI_INT, my_right_child, MMPI_TAG_METADATA, MPI_COMM_WORLD, &trash);
-		MPI_Isend(data_right, 2 * data_right_len, MPI_DOUBLE, my_right_child, MMPI_TAG_DATA, MPI_COMM_WORLD, &req_right);
-		MPI_Wait(&req_left, &status_left);
-		MPI_Wait(&req_right, &status_right);
+		send_data(data_left, data_left_len, my_left_child, data_right, data_right_len, my_right_child);
 		free(data_left);
 		free(data_right);
 	} else {
-		MPI_Recv(&my_data_len, 1, MPI_INT, my_parent, MMPI_TAG_METADATA, MPI_COMM_WORLD, &status);
-		my_data = malloc(sizeof(double) * my_data_len * 2);
-		if (!my_data)
-			perror_exit("malloc()");
-		MPI_Recv(my_data, 2 * my_data_len, MPI_DOUBLE, my_parent, MMPI_TAG_DATA, MPI_COMM_WORLD, &status);
-		struct kdnode my_node = build_node(my_data, my_data_len);
+		my_node.axis = -1;
+		if (my_data_len == 1) {
+			my_node.axis = 0;
+			my_node.split[0] = my_data[0];
+			my_node.split[1] = my_data[1];
+			printf("process %d, terminal node: x = %lf, y = %lf\n", rank, my_data[0], my_data[1]);
+			if (my_left_child < nproc && my_right_child < nproc)
+				send_exit_signal(my_left_child, my_right_child);
+		} else
+			printf("process %d, terminal empty node\n", rank);
+		my_node.left = NULL;
+		my_node.right = NULL;
 	}
 
+	if (!rank) {
+		memcpy(tree, &my_node, sizeof(my_node));
+		for (int i = 1; i < nproc; i++)
+			MPI_Recv(&tree[i], 1, node_type, i, MMPI_TAG_NODE, MPI_COMM_WORLD, &status);
+		printf("Final result:\n");
+		struct kdnode *n;
+		for (int i = 0; i < nproc; i++) {
+			n = &tree[i];
+			if (n->axis != -2)
+				printf("Node %d: address = %p, (%.1lf,%.1lf), left = %p, right = %p\n", i, n, n->split[0], n->split[1], n->left, n->right);
+		}
+	} else {
+		MPI_Send(&my_node, 1, node_type, 0, MMPI_TAG_NODE, MPI_COMM_WORLD);
+	}
+
+	if (!rank)
+		free(tree);
 	free(my_data);
 	MPI_Finalize();
 	return 0;
