@@ -10,7 +10,6 @@
 #include "mpi.h"
 
 #define DATASET_SIZE	10
-#define REAL_VARIANCE
 #ifndef VERBOSE
 #define VERBOSE			1
 #endif
@@ -225,13 +224,6 @@ int main(int argc, char *argv[])
 		}
 		my_data = load_points(argv[1]);
 		my_data_len = DATASET_SIZE;
-		/*
-		unsigned int tree_levels = (unsigned int) ((log2(my_data_len) + 1e-10) + 1);
-		unsigned long lower = 1 << (tree_levels - 1);
-		unsigned long upper = 1 << tree_levels;
-		tree_levels += lower > my_data_len;
-		printf("lower = %ld; upper = %ld;\n", lower, upper);
-		*/
 		tree = malloc(sizeof(struct kdnode) * nproc);
 		if (!tree)
 			perror_exit("malloc()");
