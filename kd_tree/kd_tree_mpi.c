@@ -8,50 +8,14 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include "mpi.h"
-
-#define DATASET_SIZE	10
-#ifndef VERBOSE
-#define VERBOSE			1
-#endif
+#include "kd_tree.h"
 
 #define MMPI_TAG_METADATA	0
 #define MMPI_TAG_DATA		1
 #define MMPI_TAG_NODE		2
 
-struct kdnode {
-	char axis;
-	double split[2];
-	struct kdnode *left, *right;
-};
-
-void perror_exit(char *msg)
-{
-	perror(msg);
-	MPI_Abort(MPI_COMM_WORLD, 1);
-	exit(EXIT_FAILURE);
-}
-
-double *load_points(char *filename)
-{
-	FILE *data_file = fopen(filename, "r");
-	if (data_file == NULL)
-		perror_exit("fopen()");
-	double *data = calloc(2 * DATASET_SIZE, sizeof(*data));
-	if (!data)
-		perror_exit("calloc()");
-	double *x = data, *y = data + DATASET_SIZE;
-	for (; x < data + DATASET_SIZE; x++, y++) {
-		fscanf(data_file, "%lf", x);
-		fscanf(data_file, "%lf", y);
-	}
-	if (fclose(data_file))
-		perror_exit("fclose()");
-#if VERBOSE
-	for (double *datar = data; datar < data + DATASET_SIZE; datar++)
-		printf("point x = %lf; y = %lf\n", *datar, *(datar + DATASET_SIZE));
-#endif
-	return data;
-}
+void perror_exit(char *msg);
+double *load_points(char *filename);
 
 double get_mean(double *data, int len, char axis)
 {
@@ -106,7 +70,7 @@ struct kdnode build_node(double *my_data, int my_data_len, int rank)
 	variance[1] = get_variance(my_data, my_data_len, 1, mean[1]);
 	char max_variance_axis = variance[0] < variance[1];
 	int median_idx = get_median_index(my_data, my_data_len, max_variance_axis, mean[max_variance_axis]);
-#if VERBOSE
+#ifdef VERBOSE
 	printf("mean: x = %lf; y = %lf\n", mean[0], mean[1]);
 	printf("variance: x = %lf; y = %lf\n", variance[0], variance[1]);
 	printf("median: %lf\n", my_data[median_idx + max_variance_axis * my_data_len]);
@@ -115,7 +79,7 @@ struct kdnode build_node(double *my_data, int my_data_len, int rank)
 	my_node.axis = max_variance_axis;
 	my_node.split[0] = my_data[median_idx];
 	my_node.split[1] = my_data[median_idx + my_data_len];
-#if VERBOSE
+#ifdef VERBOSE
 	printf("process %d: node: axis = %d; point x = %lf, y = %lf\n", rank, my_node.axis, my_node.split[0], my_node.split[1]);
 #endif
 	return my_node;
@@ -250,7 +214,7 @@ int main(int argc, char *argv[])
 		double *data_left, *data_right;
 		int data_left_len, data_right_len;
 		split_data(my_data, my_data_len, &data_left, &data_left_len, &data_right, &data_right_len, &my_node);
-#if VERBOSE
+#ifdef VERBOSE
 		for (int i = 0; i < data_left_len * 2; i++)
 			printf("data_left[%d] = %lf\n", i, data_left[i]);
 		for (int i = 0; i < data_right_len * 2; i++)
