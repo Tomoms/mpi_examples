@@ -16,74 +16,10 @@
 
 void perror_exit(char *msg);
 double *load_points(char *filename);
-
-double get_mean(double *data, int len, char axis)
-{
-	double *startpos = data + axis * len;
-	double *endpos = data + (axis + 1) * len;
-	double mean = 0;
-	for (double *scanner = startpos; scanner < endpos; scanner++)
-		mean += *scanner;
-	mean /= len;
-	return mean;
-}
-
-double get_variance(double *data, int len, char axis, double mean)
-{
-	double *startpos = data + axis * len;
-	double *endpos = data + (axis + 1) * len;
-	double variance = 0;
-	for (double *scanner = startpos; scanner < endpos; scanner++)
-		variance += (*scanner - mean)
-#ifdef REAL_VARIANCE
-		* (*scanner - mean)
-#endif
-		;
-#ifdef REAL_VARIANCE
-	variance /= len;
-#endif
-	return variance;
-}
-
-int get_median_index(double *data, int len, char axis, double mean)
-{
-	int offset = axis * len;
-	double delta = DBL_MAX, candidate_delta;
-	int index;
-	for (int i = 0; i < len; i++) {
-		candidate_delta = fabs(data[i + offset] - mean);
-		if (candidate_delta < delta) {
-			delta = candidate_delta;
-			index = i;
-		}
-	}
-	return index;
-}
-
-struct kdnode build_node(double *my_data, int my_data_len, int rank)
-{
-	double mean[2];
-	double variance[2];
-	mean[0] = get_mean(my_data, my_data_len, 0);
-	variance[0] = get_variance(my_data, my_data_len, 0, mean[0]);
-	mean[1] = get_mean(my_data, my_data_len, 1);
-	variance[1] = get_variance(my_data, my_data_len, 1, mean[1]);
-	char max_variance_axis = variance[0] < variance[1];
-	int median_idx = get_median_index(my_data, my_data_len, max_variance_axis, mean[max_variance_axis]);
-#ifdef VERBOSE
-	printf("mean: x = %lf; y = %lf\n", mean[0], mean[1]);
-	printf("variance: x = %lf; y = %lf\n", variance[0], variance[1]);
-	printf("median: %lf\n", my_data[median_idx + max_variance_axis * my_data_len]);
-#endif
-	struct kdnode my_node;
-	my_node.axis = max_variance_axis;
-	my_node.split[0] = my_data[median_idx];
-	my_node.split[1] = my_data[median_idx + my_data_len];
-#ifdef VERBOSE
-	printf("process %d: node: axis = %d; point x = %lf, y = %lf\n", rank, my_node.axis, my_node.split[0], my_node.split[1]);
-#endif
-	return my_node;
-}
+double get_mean(double *data, int len, char axis);
+double get_variance(double *data, int len, char axis, double mean);
+int get_median_index(double *data, int len, char axis, double mean);
+struct kdnode build_node(double *my_data, int my_data_len);
 
 void setup_node_type(MPI_Datatype *node_type)
 {
@@ -208,7 +144,7 @@ int main(int argc, char *argv[])
 	MPI_Bcast(&tree, 1, MPI_AINT, 0, MPI_COMM_WORLD);
 
 	if (my_data_len > 1) {
-		my_node = build_node(my_data, my_data_len, rank);
+		my_node = build_node(my_data, my_data_len);
 		my_node.left = tree + my_left_child;
 		my_node.right = tree + my_right_child;
 		double *data_left, *data_right;
@@ -229,11 +165,15 @@ int main(int argc, char *argv[])
 			my_node.axis = 0;
 			my_node.split[0] = my_data[0];
 			my_node.split[1] = my_data[1];
+#ifdef VERBOSE
 			printf("process %d, terminal node: x = %lf, y = %lf\n", rank, my_data[0], my_data[1]);
+#endif
 			if (my_left_child < nproc && my_right_child < nproc)
 				send_exit_signal(my_left_child, my_right_child);
 		} else
+#ifdef VERBOSE
 			printf("process %d, terminal empty node\n", rank);
+#endif
 		my_node.left = NULL;
 		my_node.right = NULL;
 	}
@@ -242,7 +182,6 @@ int main(int argc, char *argv[])
 		memcpy(tree, &my_node, sizeof(my_node));
 		for (int i = 1; i < nproc; i++)
 			MPI_Recv(&tree[i], 1, node_type, i, MMPI_TAG_NODE, MPI_COMM_WORLD, &status);
-		printf("Final result:\n");
 		struct kdnode *n;
 		for (int i = 0; i < nproc; i++) {
 			n = &tree[i];
