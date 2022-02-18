@@ -109,3 +109,36 @@ struct kdnode build_node(double *my_data, int my_data_len)
 #endif
 	return my_node;
 }
+
+void split_data(double *data, int len, double **left, int *left_len, double **right,
+				int *right_len, struct kdnode *node)
+{
+	double *startpos = data + node->axis * len;
+	double *endpos = data + (node->axis + 1) * len;
+	int data_right_len = 0;
+	for (double *scanner = startpos; scanner < endpos; scanner++) {
+		if (*scanner > node->split[node->axis])
+			data_right_len++;
+	}
+	*right_len = data_right_len;
+	int data_left_len = len - data_right_len - 1;
+	*left_len = data_left_len;
+	*left = malloc(sizeof(double) * data_left_len * 2);
+	*right = malloc(sizeof(double) * data_right_len * 2);
+	if (!(*left) || !(*right))
+		perror_exit("malloc()");
+	int rindex = 0, lindex = 0;
+	for (int i = 0; i < len; i++) {
+		if (data[i + node->axis * len] > node->split[node->axis]) {
+			(*right)[rindex] = data[i];
+			(*right)[rindex + data_right_len] = data[i + len];
+			rindex++;
+		} else {
+			if (data[i] == node->split[0] && data[i + len] == node->split[1])
+				continue;
+			(*left)[lindex] = data[i];
+			(*left)[lindex + data_left_len] = data[i + len];
+			lindex++;
+		}
+	}
+}

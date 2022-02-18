@@ -15,11 +15,6 @@
 #define MMPI_TAG_NODE		2
 
 void perror_exit(char *msg);
-double *load_points(char *filename);
-double get_mean(double *data, int len, char axis);
-double get_variance(double *data, int len, char axis, double mean);
-int get_median_index(double *data, int len, char axis, double mean);
-struct kdnode build_node(double *my_data, int my_data_len);
 
 void setup_node_type(MPI_Datatype *node_type)
 {
@@ -39,39 +34,6 @@ void setup_node_type(MPI_Datatype *node_type)
 	MPI_Datatype types[4] = {MPI_CHAR, MPI_DOUBLE, MPI_AINT, MPI_AINT};
 	MPI_Type_create_struct(4, lengths, displacements, types, node_type);
 	MPI_Type_commit(node_type);
-}
-
-void split_data(double *data, int len, double **left, int *left_len, double **right,
-				int *right_len, struct kdnode *node)
-{
-	double *startpos = data + node->axis * len;
-	double *endpos = data + (node->axis + 1) * len;
-	int data_right_len = 0;
-	for (double *scanner = startpos; scanner < endpos; scanner++) {
-		if (*scanner > node->split[node->axis])
-			data_right_len++;
-	}
-	*right_len = data_right_len;
-	int data_left_len = len - data_right_len - 1;
-	*left_len = data_left_len;
-	*left = malloc(sizeof(double) * data_left_len * 2);
-	*right = malloc(sizeof(double) * data_right_len * 2);
-	if (!(*left) || !(*right))
-		perror_exit("malloc()");
-	int rindex = 0, lindex = 0;
-	for (int i = 0; i < len; i++) {
-		if (data[i + node->axis * len] > node->split[node->axis]) {
-			(*right)[rindex] = data[i];
-			(*right)[rindex + data_right_len] = data[i + len];
-			rindex++;
-		} else {
-			if (data[i] == node->split[0] && data[i + len] == node->split[1])
-				continue;
-			(*left)[lindex] = data[i];
-			(*left)[lindex + data_left_len] = data[i + len];
-			lindex++;
-		}
-	}
 }
 
 void send_data(double *left, int left_len, int left_rank, double *right, int right_len, int right_rank)
@@ -179,7 +141,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (!rank) {
-		memcpy(tree, &my_node, sizeof(my_node));
+		*tree = my_node;
 		for (int i = 1; i < nproc; i++)
 			MPI_Recv(&tree[i], 1, node_type, i, MMPI_TAG_NODE, MPI_COMM_WORLD, &status);
 		struct kdnode *n;
