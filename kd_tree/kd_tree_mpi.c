@@ -132,10 +132,11 @@ int main(int argc, char *argv[])
 #endif
 			if (my_left_child < nproc && my_right_child < nproc)
 				send_exit_signal(my_left_child, my_right_child);
-		} else
+		} else {
 #ifdef VERBOSE
 			printf("process %d, terminal empty node\n", rank);
 #endif
+		}
 		my_node.left = NULL;
 		my_node.right = NULL;
 	}
