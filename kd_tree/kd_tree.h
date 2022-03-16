@@ -1,3 +1,5 @@
+#include <stdio.h>
+#include <stdlib.h>
 #include <math.h>
 #include <float.h>
 
@@ -6,6 +8,7 @@
 struct kdnode {
 	char axis;
 	double split[2];
+	int ordinal;
 	struct kdnode *left, *right;
 };
 
@@ -18,24 +21,40 @@ inline void perror_exit(char *msg)
 	exit(EXIT_FAILURE);
 }
 
-double *load_points(char *filename)
+int count_points(char *filename)
+{
+	FILE *file = fopen(filename, "r");
+	if (!file)
+		perror_exit("fopen()");
+
+	int lines = 0;
+	while (EOF != (fscanf(file, "%*[^\n]"), fscanf(file, "%*c")))
+		lines++;
+
+	if (fclose(file))
+		perror_exit("fclose()");
+
+	return lines;
+}
+
+double *load_points(char *filename, int npoints)
 {
 	FILE *data_file = fopen(filename, "r");
 	if (data_file == NULL)
 		perror_exit("fopen()");
-	double *data = calloc(2 * DATASET_SIZE, sizeof(*data));
+	double *data = calloc(2 * npoints, sizeof(*data));
 	if (!data)
 		perror_exit("calloc()");
-	double *x = data, *y = data + DATASET_SIZE;
-	for (; x < data + DATASET_SIZE; x++, y++) {
+	double *x = data, *y = data + npoints;
+	for (; x < data + npoints; x++, y++) {
 		fscanf(data_file, "%lf", x);
 		fscanf(data_file, "%lf", y);
 	}
 	if (fclose(data_file))
 		perror_exit("fclose()");
 #ifdef VERBOSE
-	for (double *datar = data; datar < data + DATASET_SIZE; datar++)
-		printf("point x = %lf; y = %lf\n", *datar, *(datar + DATASET_SIZE));
+	for (double *datar = data; datar < data + npoints; datar++)
+		printf("point x = %lf; y = %lf\n", *datar, *(datar + npoints));
 #endif
 	return data;
 }
@@ -56,8 +75,9 @@ double get_variance(double *data, int len, char axis, double mean)
 	double *startpos = data + axis * len;
 	double *endpos = data + (axis + 1) * len;
 	double variance = 0;
+	double contribution;
 	for (double *scanner = startpos; scanner < endpos; scanner++) {
-		double contribution = fabs(*scanner - mean);
+		contribution = fabs(*scanner - mean);
 		variance += contribution
 #ifdef REAL_VARIANCE
 		* contribution
@@ -85,8 +105,19 @@ int get_median_index(double *data, int len, char axis, double mean)
 	return index;
 }
 
-struct kdnode build_node(double *my_data, int my_data_len)
+struct kdnode build_node(double *my_data, int my_data_len, int ordinal)
 {
+	struct kdnode my_node;
+	if (!my_data_len) {
+		my_node.axis = -1;
+		my_node.split[0] = 0;
+		my_node.split[1] = 0;
+		my_node.ordinal = ordinal;
+		my_node.left = NULL;
+		my_node.right = NULL;
+		goto print_exit;
+	}
+
 	double mean[2];
 	double variance[2];
 	mean[0] = get_mean(my_data, my_data_len, 0);
@@ -100,12 +131,13 @@ struct kdnode build_node(double *my_data, int my_data_len)
 	printf("variance: x = %lf; y = %lf\n", variance[0], variance[1]);
 	printf("median: %lf\n", my_data[median_idx + max_variance_axis * my_data_len]);
 #endif
-	struct kdnode my_node;
 	my_node.axis = max_variance_axis;
+	my_node.ordinal = ordinal;
 	my_node.split[0] = my_data[median_idx];
 	my_node.split[1] = my_data[median_idx + my_data_len];
-#ifdef VERBOSE
-	printf("node: axis = %d; point x = %lf, y = %lf\n", my_node.axis, my_node.split[0], my_node.split[1]);
+print_exit:
+#ifdef VERBOSE_RES
+	printf("node: axis = %d; ordinal = %d; point: (%lf,%lf)\n", my_node.axis, my_node.ordinal, my_node.split[0], my_node.split[1]);
 #endif
 	return my_node;
 }
@@ -132,13 +164,24 @@ void split_data(double *data, int len, double **left, int *left_len, double **ri
 		if (data[i + node->axis * len] > node->split[node->axis]) {
 			(*right)[rindex] = data[i];
 			(*right)[rindex + data_right_len] = data[i + len];
+			//printf("copied (%.1lf, %.1lf) to right[%d]\n", data[i], data[i + len], rindex);
 			rindex++;
 		} else {
 			if (data[i] == node->split[0] && data[i + len] == node->split[1])
 				continue;
 			(*left)[lindex] = data[i];
 			(*left)[lindex + data_left_len] = data[i + len];
+			//printf("copied (%.1lf, %.1lf) to left[%d]\n", data[i], data[i + len], lindex);
 			lindex++;
 		}
 	}
+}
+
+int compute_total_nodes(int npoints)
+{
+	if (npoints <= 1)
+		return 1;
+	int left = (int) ((npoints - 1) / 2);
+	int right = npoints - 1 - left;
+	return 1 + compute_total_nodes(left) + compute_total_nodes(right);
 }
