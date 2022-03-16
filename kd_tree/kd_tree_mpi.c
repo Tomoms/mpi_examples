@@ -18,8 +18,6 @@ struct task_metadata {
 	int data_size;
 };
 
-void perror_exit(char *msg);
-
 void setup_node_type(MPI_Datatype *node_type)
 {
 	int lengths[5] = {1, 2, 1, 1, 1};
@@ -68,21 +66,6 @@ void send_data(double *left, int left_len, int left_rank, double *right, int rig
 	MPI_Wait(&request_right, &status_right);
 }
 
-static inline int get_left_child(int index)
-{
-	return 2 * index + 1;
-}
-
-static inline int get_right_child(int index)
-{
-	return (index + 1) * 2;
-}
-
-static inline int get_parent(int index)
-{
-	return (int) ((index - 1) / 2);
-}
-
 void build_metadata(int my_node_index, int left_len, int right_len, struct task_metadata *meta_left, struct task_metadata *meta_right)
 {
 	meta_left->node_index = get_left_child(my_node_index);
@@ -99,14 +82,6 @@ void send_metadata(struct task_metadata *meta_left, int left_rank, struct task_m
 	MPI_Isend(meta_right, 1, metadata_type, right_rank, MMPI_TAG_METADATA, ring_comm, &request_right);
 	MPI_Wait(&request_left, &status_left);
 	MPI_Wait(&request_right, &status_right);
-}
-
-struct kdnode *extend_tree(struct kdnode *tree, size_t new_size)
-{
-	struct kdnode *new_tree = realloc(tree, new_size * sizeof(struct kdnode));
-	if (!new_tree)
-		perror_exit("realloc()");
-	return new_tree;
 }
 
 int main(int argc, char *argv[])
@@ -166,6 +141,7 @@ int main(int argc, char *argv[])
 			free(my_data);
 		}
 		int recv_nodes = 1; //  my own
+		// suboptimal - this leaves holes where non-existing nodes would be, except for final non-existing nodes
 		while (recv_nodes < final_tree_size) {
 			struct kdnode buf;
 			MPI_Recv(&buf, 1, node_type, MPI_ANY_SOURCE, MMPI_TAG_NODE, ring_comm, &status);
@@ -175,11 +151,7 @@ int main(int argc, char *argv[])
 				current_tree_size = node_index + 1;
 			}
 			tree[node_index] = buf;
-			int parent_index = get_parent(node_index);
-			if (get_left_child(parent_index) == node_index)
-				tree[parent_index].left = &tree[node_index];
-			else
-				tree[parent_index].right = &tree[node_index];
+			pointer_fixup(tree, node_index);
 			recv_nodes++;
 		}
 		for (int i = 1; i < nproc; i++)

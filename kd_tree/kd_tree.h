@@ -3,8 +3,6 @@
 #include <math.h>
 #include <float.h>
 
-#define DATASET_SIZE	10
-
 struct kdnode {
 	char axis;
 	double split[2];
@@ -12,7 +10,7 @@ struct kdnode {
 	struct kdnode *left, *right;
 };
 
-inline void perror_exit(char *msg)
+static inline void perror_exit(char *msg)
 {
 	perror(msg);
 #ifdef MPI
@@ -108,6 +106,7 @@ int get_median_index(double *data, int len, char axis, double mean)
 struct kdnode build_node(double *my_data, int my_data_len, int ordinal)
 {
 	struct kdnode my_node;
+
 	if (!my_data_len) {
 		my_node.axis = -1;
 		my_node.split[0] = 0;
@@ -164,14 +163,12 @@ void split_data(double *data, int len, double **left, int *left_len, double **ri
 		if (data[i + node->axis * len] > node->split[node->axis]) {
 			(*right)[rindex] = data[i];
 			(*right)[rindex + data_right_len] = data[i + len];
-			//printf("copied (%.1lf, %.1lf) to right[%d]\n", data[i], data[i + len], rindex);
 			rindex++;
 		} else {
 			if (data[i] == node->split[0] && data[i + len] == node->split[1])
 				continue;
 			(*left)[lindex] = data[i];
 			(*left)[lindex + data_left_len] = data[i + len];
-			//printf("copied (%.1lf, %.1lf) to left[%d]\n", data[i], data[i + len], lindex);
 			lindex++;
 		}
 	}
@@ -184,4 +181,36 @@ int compute_total_nodes(int npoints)
 	int left = (int) ((npoints - 1) / 2);
 	int right = npoints - 1 - left;
 	return 1 + compute_total_nodes(left) + compute_total_nodes(right);
+}
+
+static inline struct kdnode *extend_tree(struct kdnode *tree, size_t new_size)
+{
+	struct kdnode *new_tree = realloc(tree, new_size * sizeof(struct kdnode));
+	if (!new_tree)
+		perror_exit("realloc()");
+	return new_tree;
+}
+
+static inline int get_left_child(int index)
+{
+	return 2 * index + 1;
+}
+
+static inline int get_right_child(int index)
+{
+	return (index + 1) * 2;
+}
+
+static inline int get_parent(int index)
+{
+	return (int) ((index - 1) / 2);
+}
+
+static inline void pointer_fixup(struct kdnode *tree, int node_index)
+{
+	int parent_index = get_parent(node_index);
+	if (get_left_child(parent_index) == node_index)
+		tree[parent_index].left = &tree[node_index];
+	else
+		tree[parent_index].right = &tree[node_index];
 }
