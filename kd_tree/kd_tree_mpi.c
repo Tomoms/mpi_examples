@@ -103,9 +103,9 @@ void send_metadata(struct task_metadata *meta_left, int left_rank, struct task_m
 
 struct kdnode *extend_tree(struct kdnode *tree, size_t new_size)
 {
-	struct kdnode *new_tree = reallocarray(tree, new_size, sizeof(struct kdnode));
+	struct kdnode *new_tree = realloc(tree, new_size * sizeof(struct kdnode));
 	if (!new_tree)
-		perror_exit("reallocarray()");
+		perror_exit("realloc()");
 	return new_tree;
 }
 
