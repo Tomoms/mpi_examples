@@ -1,7 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <math.h>
 #include <float.h>
+#ifdef MPI
+#include "mpi.h"
+#endif
 
 struct kdnode {
 	char axis;
@@ -183,6 +187,14 @@ int compute_total_nodes(int npoints)
 	return 1 + compute_total_nodes(left) + compute_total_nodes(right);
 }
 
+size_t compute_tree_size(int nodes)
+{
+	size_t ret = 1;
+	while (ret < nodes)
+		ret *= 2;
+	return ret - 1;
+}
+
 static inline struct kdnode *extend_tree(struct kdnode *tree, size_t new_size)
 {
 	struct kdnode *new_tree = realloc(tree, new_size * sizeof(struct kdnode));
@@ -190,6 +202,15 @@ static inline struct kdnode *extend_tree(struct kdnode *tree, size_t new_size)
 		perror_exit("realloc()");
 	return new_tree;
 }
+
+static inline bool *extend_indexes(bool *array, size_t new_size)
+{
+	bool *new_array = realloc(array, new_size * sizeof(bool));
+	if (!new_array)
+		perror_exit("realloc()");
+	return new_array;
+}
+
 
 static inline int get_left_child(int index)
 {
@@ -206,11 +227,29 @@ static inline int get_parent(int index)
 	return (int) ((index - 1) / 2);
 }
 
-static inline void pointer_fixup(struct kdnode *tree, int node_index)
+void fixup_pointers(struct kdnode *tree, size_t tree_size, bool *valid_indexes)
 {
-	int parent_index = get_parent(node_index);
-	if (get_left_child(parent_index) == node_index)
-		tree[parent_index].left = &tree[node_index];
-	else
-		tree[parent_index].right = &tree[node_index];
+	int child;
+	for (int i = 0; i < tree_size; i++) {
+		if (valid_indexes[i]) {
+			if ((child = get_left_child(i)) < tree_size && valid_indexes[child])
+				tree[i].left = tree + child;
+			if ((child = get_right_child(i)) < tree_size && valid_indexes[child])
+				tree[i].right = tree + child;
+		}
+	}
+}
+
+void print_tree(struct kdnode *tree, size_t tree_size, bool *valid_indexes)
+{
+	for (int i = 0; i < tree_size; i++) {
+		if (valid_indexes[i]) {
+			if (tree[i].axis == -1)
+				printf("%d: address %p: empty node\n", tree[i].ordinal, tree + i);
+			else
+				printf("%d: address %p: (%.1lf, %.1lf); left child: %p, right child: %p\n",
+					   tree[i].ordinal, tree + i, tree[i].split[0], tree[i].split[1],
+					   tree[i].left, tree[i].right);
+		}
+	}
 }

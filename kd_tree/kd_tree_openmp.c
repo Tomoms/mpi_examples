@@ -1,10 +1,8 @@
-#include <stdio.h>
-#include <stdlib.h>
 #include <omp.h>
 #include "kd_tree.h"
 
 struct kdnode *tree = NULL;
-size_t current_tree_size = 0;
+bool *valid_indexes = NULL;
 
 void build_node_and_create_tasks(double *data, int len, int ordinal)
 {
@@ -34,15 +32,8 @@ void build_node_and_create_tasks(double *data, int len, int ordinal)
 			}
 		}
 	}
-	#pragma omp critical
-	{
-		if (ordinal + 1 > current_tree_size) {
-			tree = extend_tree(tree, ordinal + 1);
-			current_tree_size = ordinal + 1;
-		}
-	}
 	tree[ordinal] = my_node;
-	pointer_fixup(tree, ordinal);
+	valid_indexes[ordinal] = 1;
 	free(data);
 }
 
@@ -55,9 +46,15 @@ int main(int argc, char *argv[])
 
 	int npoints = count_points(argv[1]);
 	double *data = load_points(argv[1], npoints);
-	int final_tree_size = compute_total_nodes(npoints);
+	int total_nodes = compute_total_nodes(npoints);
+	size_t tree_size = compute_tree_size(total_nodes);
 
-	tree = extend_tree(tree, ++current_tree_size);
+	tree = malloc(tree_size * sizeof(struct kdnode));
+	if (!tree)
+		perror_exit("malloc()");
+	valid_indexes = calloc(tree_size, sizeof(bool));
+	if (!valid_indexes)
+		perror_exit("calloc()");
 
 	#pragma omp parallel
 	{
@@ -65,8 +62,9 @@ int main(int argc, char *argv[])
 			build_node_and_create_tasks(data, npoints, 0);
 	}
 
-	for (int i = 0; i < current_tree_size; i++)
-		printf("%d: (%.1lf, %.1lf)\n", tree[i].ordinal, tree[i].split[0], tree[i].split[1]);
+	fixup_pointers(tree, tree_size, valid_indexes);
+	print_tree(tree, tree_size, valid_indexes);
 	free(tree);
+	free(valid_indexes);
 	return 0;
 }

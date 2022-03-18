@@ -2,7 +2,6 @@
 #include <string.h>
 #include <alloca.h>
 #include <sys/param.h>
-#include "mpi.h"
 #include "kd_tree.h"
 
 #define MMPI_TAG_METADATA	0
@@ -104,19 +103,17 @@ int main(int argc, char *argv[])
 	MPI_Cart_shift(ring_comm, 0, 1, &neighbors[0], &neighbors[1]);
 	MPI_Comm_rank(ring_comm, &rank);
 	// rank 0 is only responsible of collecting nodes
-	if (neighbors[0] == 0)
-		neighbors[0] = nproc - 1;
-	if (neighbors[1] == 0)
-		neighbors[1] = 1;
+	(!neighbors[0] && (neighbors[0] = nproc - 1));
+	(!neighbors[1] && (neighbors[1] = 1));
 
 	setup_node_type(&node_type);
 	setup_metadata_type(&metadata_type);
 
 	double *my_data = NULL;
 	double *data_left = NULL, *data_right = NULL;
-	int my_data_len, data_left_len, data_right_len;
-	size_t final_tree_size, current_tree_size = 0;
-	struct kdnode my_node, *tree = NULL;
+	int my_data_len, data_left_len, data_right_len, total_nodes;
+	size_t tree_size;
+	struct kdnode my_node, *tree;
 	int node_index = 0;
 	if (!rank) {
 		if (argc != 2) {
@@ -126,10 +123,17 @@ int main(int argc, char *argv[])
 		}
 		my_data_len = count_points(argv[1]);
 		my_data = load_points(argv[1], my_data_len);
-		final_tree_size = compute_total_nodes(my_data_len);
+		total_nodes = compute_total_nodes(my_data_len);
+		tree_size = compute_tree_size(total_nodes);
 		my_node = build_node(my_data, my_data_len, node_index);
-		tree = extend_tree(tree, ++current_tree_size);
+		tree = malloc(tree_size * sizeof(struct kdnode));
+		if (!tree)
+			perror_exit("malloc()");
+		bool *valid_indexes = calloc(tree_size, sizeof(bool));
+		if (!valid_indexes)
+			perror_exit("calloc()");
 		tree[node_index] = my_node;
+		valid_indexes[node_index] = 1;
 		if (my_data_len > 1) {
 			split_data(my_data, my_data_len, &data_left, &data_left_len, &data_right, &data_right_len, &my_node);
 			struct task_metadata meta_left, meta_right;
@@ -142,24 +146,28 @@ int main(int argc, char *argv[])
 		}
 		int recv_nodes = 1; //  my own
 		// suboptimal - this leaves holes where non-existing nodes would be, except for final non-existing nodes
-		while (recv_nodes < final_tree_size) {
+		while (recv_nodes < total_nodes) {
 			struct kdnode buf;
 			MPI_Recv(&buf, 1, node_type, MPI_ANY_SOURCE, MMPI_TAG_NODE, ring_comm, &status);
 			node_index = buf.ordinal;
+			/*
 			if (node_index + 1 > current_tree_size) {
 				tree = extend_tree(tree, node_index + 1);
+				valid_indexes = extend_indexes(valid_indexes, node_index + 1);
 				current_tree_size = node_index + 1;
 			}
+			*/
 			tree[node_index] = buf;
-			pointer_fixup(tree, node_index);
+			valid_indexes[node_index] = 1;
 			recv_nodes++;
 		}
 		for (int i = 1; i < nproc; i++)
 			MPI_Send(NULL, 0, MPI_CHAR, i, MMPI_TAG_EXIT, ring_comm);
 
-		for (int i = 0; i < final_tree_size; i++)
-			printf("%d: (%.1lf, %.1lf)\n", tree[i].ordinal, tree[i].split[0], tree[i].split[1]);
+		fixup_pointers(tree, tree_size, valid_indexes);
+		print_tree(tree, tree_size, valid_indexes);
 		free(tree);
+		free(valid_indexes);
 	} else {
 		bool should_exit = 0;
 		while (!should_exit) {
