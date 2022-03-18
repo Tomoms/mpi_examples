@@ -195,23 +195,6 @@ size_t compute_tree_size(int nodes)
 	return ret - 1;
 }
 
-static inline struct kdnode *extend_tree(struct kdnode *tree, size_t new_size)
-{
-	struct kdnode *new_tree = realloc(tree, new_size * sizeof(struct kdnode));
-	if (!new_tree)
-		perror_exit("realloc()");
-	return new_tree;
-}
-
-static inline bool *extend_indexes(bool *array, size_t new_size)
-{
-	bool *new_array = realloc(array, new_size * sizeof(bool));
-	if (!new_array)
-		perror_exit("realloc()");
-	return new_array;
-}
-
-
 static inline int get_left_child(int index)
 {
 	return 2 * index + 1;

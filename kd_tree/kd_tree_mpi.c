@@ -145,18 +145,10 @@ int main(int argc, char *argv[])
 			free(my_data);
 		}
 		int recv_nodes = 1; //  my own
-		// suboptimal - this leaves holes where non-existing nodes would be, except for final non-existing nodes
 		while (recv_nodes < total_nodes) {
 			struct kdnode buf;
 			MPI_Recv(&buf, 1, node_type, MPI_ANY_SOURCE, MMPI_TAG_NODE, ring_comm, &status);
 			node_index = buf.ordinal;
-			/*
-			if (node_index + 1 > current_tree_size) {
-				tree = extend_tree(tree, node_index + 1);
-				valid_indexes = extend_indexes(valid_indexes, node_index + 1);
-				current_tree_size = node_index + 1;
-			}
-			*/
 			tree[node_index] = buf;
 			valid_indexes[node_index] = 1;
 			recv_nodes++;
@@ -172,7 +164,6 @@ int main(int argc, char *argv[])
 		bool should_exit = 0;
 		while (!should_exit) {
 			MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, ring_comm, &status);
-			//printf("rank %d probed something: status.MPI_SOURCE = %d, Tag= %d\n", rank, status.MPI_SOURCE, status.MPI_TAG);
 			if (status.MPI_SOURCE == 0 && status.MPI_TAG == MMPI_TAG_EXIT) {
 				MPI_Recv(NULL, 0, MPI_CHAR, 0, MMPI_TAG_EXIT, ring_comm, &status);
 				should_exit = 1;
@@ -187,43 +178,26 @@ int main(int argc, char *argv[])
 					if (!my_data)
 						perror_exit("malloc()");
 					MPI_Recv(my_data, my_data_len * 2, MPI_DOUBLE, status.MPI_SOURCE, MMPI_TAG_DATA, ring_comm, &status);
-					/*printf("rank %d has data for ordinal %d: ", rank, node_index);
-					for(int i = 0;  i < my_data_len; i++) {
-						printf("(%.1lf, %.1lf)\t", my_data[i], my_data[i + my_data_len]);
-					}
-					printf("\n");
-					*/
 					my_node = build_node(my_data, my_data_len, node_index);
 					if (my_data_len > 1) {
 						split_data(my_data, my_data_len, &data_left, &data_left_len, &data_right, &data_right_len, &my_node);
-						/*for (int i = 0; i < data_left_len; i++)
-							printf("left[%d]: (%.1lf, %.1lf)\t", i, data_left[i], data_left[i + data_left_len]);
-						printf("\n");
-						for (int i = 0; i < data_right_len; i++)
-							printf("right[%d]: (%.1lf, %.1lf)\t", i, data_right[i], data_right[i + data_right_len]);
-						printf("\n");
-						*/
 						struct task_metadata meta_left, meta_right;
 						build_metadata(node_index, data_left_len, data_right_len, &meta_left, &meta_right);
 						send_metadata(&meta_left, neighbors[0], &meta_right, neighbors[1]);
-						//printf("rank %d build node (%.1lf, %.1lf) and is now sending data\n", rank, my_node.split[0], my_node.split[1]);
 						send_data(data_left, data_left_len, neighbors[0], data_right, data_right_len, neighbors[1]);
 						free(data_left);
 						free(data_right);
 						free(my_data);
 					}
 				} else { // empty terminal node
-					//printf("rank %d has no data for ordinal %d\n", rank, node_index);
 					MPI_Recv(NULL, 0, MPI_DOUBLE, status.MPI_SOURCE, MMPI_TAG_DATA, ring_comm, &status);
 					my_node = build_node(NULL, my_data_len, node_index);
 				}
-				//printf("rank %d sent node\n", rank);
 				MPI_Send(&my_node, 1, node_type, 0, MMPI_TAG_NODE, ring_comm);
 			}
 		}
 	}
 
-	//printf("rank %d exiting\n", rank);
 	MPI_Finalize();
 	return 0;
 }
